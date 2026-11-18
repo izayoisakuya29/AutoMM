@@ -8,7 +8,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-_ENV_DROP_PREFIXES = ("ANTHROPIC_", "CLAUDE", "OPENAI_", "DEEPSEEK_")
+_ENV_DROP_PREFIXES = (
+    "ANTHROPIC_",
+    "CLAUDE",
+    "OPENAI_",
+    "DEEPSEEK_",
+    "KIMI_",
+    "MOONSHOT_",
+    "GEMINI_",
+    "GOOGLE_",
+    "AZURE_OPENAI_",
+)
 
 
 class ProviderError(RuntimeError):
