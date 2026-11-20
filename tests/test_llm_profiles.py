@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from automm.llm.base import ProviderConfigError
+from automm.llm.codex_paths import find_codex_executable
 from automm.llm.profiles import (
+    load_agent_registry,
     load_profile,
     profile_warnings,
     resolve_profile,
@@ -119,3 +121,121 @@ def test_profile_warnings_for_missing_kimi_env(tmp_path: Path) -> None:
     config["profiles"]["kimi"]["api_key_env"] = "AUTOMM_TEST_MISSING_KIMI_KEY"
     warnings = profile_warnings(config, environ={})
     assert any("AUTOMM_TEST_MISSING_KIMI_KEY" in warning for warning in warnings)
+
+
+def test_validate_profiles_allows_disabled_openjiuwen(tmp_path: Path) -> None:
+    config = make_runtime(tmp_path)
+    config["profiles"]["openjiuwen"] = {"harness": "openjiuwen", "enabled": False}
+    assert validate_profiles(config) == []
+
+
+def test_validate_profiles_rejects_enabled_openjiuwen(tmp_path: Path) -> None:
+    config = make_runtime(tmp_path)
+    config["profiles"]["openjiuwen"] = {"harness": "openjiuwen"}
+    errors = validate_profiles(config)
+    assert any("openjiuwen" in error for error in errors)
+
+
+def test_load_agent_registry_requires_registry_key() -> None:
+    with pytest.raises(ProviderConfigError, match="registry"):
+        load_agent_registry({})
+
+
+def test_load_agent_registry_rejects_non_string_registry() -> None:
+    with pytest.raises(ProviderConfigError, match="registry"):
+        load_agent_registry({"registry": ["config/agent_registry.yaml"]})
+
+
+def test_load_agent_registry_wraps_missing_registry(project_root: Path) -> None:
+    with pytest.raises(ProviderConfigError, match="registry"):
+        load_agent_registry({"registry": "config/does-not-exist-registry.yaml"})
+
+
+def test_load_agent_registry_rejects_non_mapping_agents(project_root: Path) -> None:
+    path = project_root / "config" / "bad-registry.yaml"
+    path.write_text("agents: []\n", encoding="utf-8")
+    with pytest.raises(ProviderConfigError, match="agents"):
+        load_agent_registry({"registry": "config/bad-registry.yaml"})
+
+
+def test_load_profile_empty_config_does_not_use_defaults() -> None:
+    with pytest.raises(ProviderConfigError, match="未知 profile"):
+        load_profile("deepseek", {})
+
+
+def test_resolve_profile_empty_config_does_not_use_defaults() -> None:
+    agents = {"sanity-checker": {"prompt": "agents/sanity-checker.md", "stages": []}}
+    with pytest.raises(ProviderConfigError, match="default_profile"):
+        resolve_profile("sanity-checker", runtime_config={}, agent_registry=agents)
+
+
+def test_validate_profiles_rejects_list_default_profile(tmp_path: Path) -> None:
+    config = make_runtime(tmp_path)
+    config["default_profile"] = ["deepseek"]
+    errors = validate_profiles(config)
+    assert any("default_profile" in error for error in errors)
+
+
+def test_validate_profiles_rejects_list_harness(tmp_path: Path) -> None:
+    config = make_runtime(tmp_path)
+    config["profiles"]["deepseek"]["harness"] = ["dsh_headless"]
+    errors = validate_profiles(config)
+    assert any("未知 harness" in error for error in errors)
+
+
+def test_validate_agent_profiles_rejects_list_profile(tmp_path: Path) -> None:
+    config = make_runtime(tmp_path)
+    errors = validate_agent_profiles(config, {"sanity-checker": {"profile": ["kimi"]}})
+    assert any("profile 必须是非空字符串" in error for error in errors)
+
+
+def test_validate_agent_profiles_skips_disabled_agent(tmp_path: Path) -> None:
+    config = make_runtime(tmp_path)
+    agents = {"sanity-checker": {"profile": "ghost", "enabled": False}}
+    assert validate_agent_profiles(config, agents) == []
+
+
+def test_validate_dsh_defaults_executable_to_dsh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = make_runtime(tmp_path)
+    config["profiles"]["deepseek"].pop("executable")
+    monkeypatch.setattr("automm.llm.profiles.shutil.which", lambda _name: None)
+    errors = validate_profiles(config)
+    assert any("dsh executable 不存在：dsh" in error for error in errors)
+
+
+def test_validate_profiles_reports_missing_kimi_home_parent(tmp_path: Path) -> None:
+    config = make_runtime(tmp_path)
+    config["profiles"]["kimi"]["kimi_code_home"] = str(tmp_path / "missing" / "kimi-home")
+    errors = validate_profiles(config)
+    assert any("kimi_code_home" in error for error in errors)
+
+
+def test_find_codex_executable_sorts_versions_numerically(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    windows_apps = tmp_path / "WindowsApps"
+    for version in ("1.9.0.0", "1.10.0.0"):
+        target = windows_apps / f"OpenAI.Codex_{version}_x64__test" / "app" / "resources"
+        target.mkdir(parents=True)
+        (target / "codex.exe").write_text("", encoding="utf-8")
+    monkeypatch.setenv("ProgramFiles", str(tmp_path))
+    monkeypatch.setattr("automm.llm.codex_paths.shutil.which", lambda _name: None)
+
+    found = find_codex_executable({})
+
+    assert found is not None
+    assert "1.10.0.0" in found
+
+
+def test_profile_warnings_for_missing_kimi_key_file(tmp_path: Path) -> None:
+    config = make_runtime(tmp_path)
+    config["profiles"]["kimi"]["api_key_file"] = str(tmp_path / "absent-key.json")
+    warnings = profile_warnings(config, environ={})
+    assert any("KIMI_API_KEY" in warning for warning in warnings)
+
+
+def test_profile_warnings_suppressed_when_key_file_exists(tmp_path: Path) -> None:
+    config = make_runtime(tmp_path)
+    assert profile_warnings(config, environ={}) == []
