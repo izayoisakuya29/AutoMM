@@ -9,6 +9,14 @@ from typing import Any
 from .base import ProviderError
 
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+# 配额/限流类错误：部分 CLI 会把它们包在 provider.auth_error 里，但它们应重试而非人工阻塞。
+_NON_AUTH_MARKERS = (
+    "rate limit",
+    "rate_limit",
+    "usage limit",
+    "quota",
+    "resource_exhausted",
+)
 _AUTH_CONTEXT_RE = re.compile(
     r"\b40[13]\b[^\n]*(?:unauthorized|auth(?:entication)?\b|api[ _-]?key|token|forbidden)",
     re.IGNORECASE,
@@ -56,4 +64,8 @@ def parse_json_text(text: str) -> dict[str, Any]:
 
 
 def looks_like_auth_error(text: str) -> bool:
+    """判断错误文本是否属于真正的认证失败；配额/限流标记优先判为非认证错误。"""
+    lowered = (text or "").lower()
+    if any(marker in lowered for marker in _NON_AUTH_MARKERS):
+        return False
     return any(pattern.search(text or "") for pattern in _AUTH_PATTERNS)
