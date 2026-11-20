@@ -7,6 +7,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from ..common import ROOT, read_yaml, resolve_project_path
 from .base import ProviderConfigError
 from .paths import expand_path, project_path
@@ -65,7 +67,10 @@ def load_agent_registry(config: dict[str, Any] | None = None) -> dict[str, Any]:
         path = resolve_project_path(registry, must_exist=True)
     except (FileNotFoundError, ValueError) as exc:
         raise ProviderConfigError(f"agent registry 不存在或不可用：{registry}") from exc
-    document = read_yaml(path)
+    try:
+        document = read_yaml(path)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise ProviderConfigError(f"agent registry 无法读取：{path}: {exc}") from exc
     if not isinstance(document, dict):
         raise ProviderConfigError(f"agent registry 必须是映射：{path}")
     agents = document.get("agents", {})
@@ -167,12 +172,17 @@ def _validate_kimi(name: str, profile: dict[str, Any]) -> list[str]:
     max_chars = profile.get("max_prompt_chars", 30000)
     if not isinstance(max_chars, int) or max_chars <= 0:
         errors.append(f"profile {name}: max_prompt_chars 必须是正整数")
-    home = project_path(profile.get("kimi_code_home", "runtime/kimi-code-home"))
-    parent = home.parent
-    if not parent.is_dir():
-        errors.append(f"profile {name}: kimi_code_home 的父目录不存在：{parent}")
-    elif not os.access(parent, os.W_OK):
-        errors.append(f"profile {name}: kimi_code_home 的父目录不可写：{parent}")
+    home = project_path(profile.get("kimi_code_home") or "runtime/kimi-code-home")
+    if home.is_file():
+        errors.append(f"profile {name}: kimi_code_home 不能是普通文件：{home}")
+    else:
+        ancestor = home
+        while not ancestor.exists() and ancestor != ancestor.parent:
+            ancestor = ancestor.parent
+        if not ancestor.is_dir():
+            errors.append(f"profile {name}: kimi_code_home 的最近存在祖先不是目录：{ancestor}")
+        elif not os.access(ancestor, os.W_OK):
+            errors.append(f"profile {name}: kimi_code_home 的最近存在祖先不可写：{ancestor}")
     key_file = profile.get("api_key_file")
     key_env = profile.get("api_key_env")
     if not key_file and not key_env:
