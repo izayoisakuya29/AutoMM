@@ -1,5 +1,8 @@
 # AutoMM 0.0.4-dsh：DeepSeek Harness 适配说明
 
+> 历史文档：0.0.4-dsh 的 DSH 单后端迁移记录。当前版本已改为原生多 harness，
+> 配置与用法以 `LLM_PROFILES.md` 和 `config/agent_runtime.yaml` 为准。
+
 本版本以 `ver_0.0.2_beta`（最成熟版本）为基底，通过 **LLM Provider 抽象** 把模型调用从
 Codex CLI 迁移到 DeepSeek Harness（DSH）的 headless 模式。状态机、事务回滚、失败分类、
 计算 task 隔离、sanity/可视化/论文构建等全部 0.0.2 成熟逻辑保持不变。
