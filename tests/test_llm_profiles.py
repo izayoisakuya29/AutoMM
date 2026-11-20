@@ -123,6 +123,32 @@ def test_validate_profiles_accepts_zero_timeout(tmp_path: Path) -> None:
     assert validate_profiles(config) == []
 
 
+def test_invoke_agent_rejects_invalid_profile_timeout_without_run_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from automm.agent_runtime import invoke_agent
+    from automm.common import RUNTIME_DIR
+
+    action_id = "act-invalid-timeout"
+    monkeypatch.setattr(
+        "automm.agent_runtime.resolve_profile",
+        lambda _agent: {"name": "bad", "harness": "dsh_headless", "timeout_seconds": True},
+    )
+    monkeypatch.setattr(
+        "automm.agent_runtime.runtime_config",
+        lambda: {
+            "output_schema": "config/agent_response.schema.json",
+            "registry": "config/agent_registry.yaml",
+            "capability_probe_on_start": False,
+        },
+    )
+
+    with pytest.raises(ProviderConfigError, match="timeout_seconds"):
+        invoke_agent("sanity-checker", {"stage": "sanity_check"}, action_id)
+
+    assert not (RUNTIME_DIR / "actions" / action_id).exists()
+
+
 def test_validate_profiles_reports_missing_kimi_key(tmp_path: Path) -> None:
     config = make_runtime(tmp_path)
     config["profiles"]["kimi"].pop("api_key_file")
