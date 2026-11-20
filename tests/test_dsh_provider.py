@@ -6,12 +6,12 @@ import pytest
 import yaml
 
 from automm.llm import get_provider
-from automm.llm.base import Invocation, ProviderAuthError, ProviderConfigError
+from automm.llm.base import Invocation, ProviderAuthError, ProviderConfigError, ProviderError
 
 
 def profile(tmp_path: Path) -> dict:
     home = tmp_path / "dsh-home"
-    (home / "profiles" / "headless").mkdir(parents=True)
+    (home / "profiles" / "headless").mkdir(parents=True, exist_ok=True)
     return {
         "name": "deepseek",
         "harness": "dsh_headless",
@@ -63,7 +63,7 @@ def test_extract_parses_stdout_and_detects_auth(tmp_path: Path, monkeypatch: pyt
 
     assert provider.extract_response(invocation, '```json\n{"ok": true}\n```', "", 0) == {"ok": True}
     with pytest.raises(ProviderAuthError):
-        provider.extract_response(invocation, "", "HTTP 401 Unauthorized", 1)
+        provider.extract_response(invocation, "", "dsh: AUTH: HTTP 401 Unauthorized", 1)
 
 
 def test_prepare_requires_provider_and_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -72,3 +72,57 @@ def test_prepare_requires_provider_and_model(tmp_path: Path, monkeypatch: pytest
     cfg["provider"] = ""
     with pytest.raises(ProviderConfigError, match="provider"):
         get_provider(cfg).prepare("p", tmp_path / "response.json")
+
+    cfg = profile(tmp_path)
+    cfg["model"] = ""
+    with pytest.raises(ProviderConfigError, match="model"):
+        get_provider(cfg).prepare("p", tmp_path / "response.json")
+
+
+def test_prepare_rejects_patch_config_reserved_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("automm.llm.dsh.DshHeadlessProvider._executable", lambda self: "dsh")
+    cfg = profile(tmp_path)
+    cfg["patch_config"] = {"provider": "other", "model": "other-model"}
+    with pytest.raises(ProviderConfigError, match="保留字段"):
+        get_provider(cfg).prepare("p", tmp_path / "response.json")
+
+
+def test_prepare_rejects_non_dict_patch_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("automm.llm.dsh.DshHeadlessProvider._executable", lambda self: "dsh")
+    cfg = profile(tmp_path)
+    cfg["patch_config"] = ["reasoningEffort"]
+    with pytest.raises(ProviderConfigError, match="patch_config"):
+        get_provider(cfg).prepare("p", tmp_path / "response.json")
+
+
+def test_prepare_defaults_permissions_and_supports_executable_args(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("automm.llm.dsh.DshHeadlessProvider._executable", lambda self: "dsh")
+    cfg = profile(tmp_path)
+    cfg.pop("permission_mode")
+    cfg.pop("approval_policy")
+    cfg["executable_args"] = ["--color", "never"]
+    invocation = get_provider(cfg).prepare("p", tmp_path / "response.json")
+
+    assert invocation.command[:3] == ["dsh", "--color", "never"]
+    assert invocation.command[-5:] == [
+        "--permission-mode",
+        "workspace-write",
+        "--approval-policy",
+        "never",
+        "-",
+    ]
+
+
+def test_extract_auth_only_for_dsh_error_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("automm.llm.dsh.DshHeadlessProvider._executable", lambda self: "dsh")
+    provider = get_provider(profile(tmp_path))
+    invocation = Invocation(command=["dsh"], output_path=tmp_path / "response.json")
+
+    with pytest.raises(ProviderAuthError):
+        provider.extract_response(invocation, "", "dsh: AUTH: invalid api key", 1)
+    with pytest.raises(ProviderError):
+        provider.extract_response(invocation, "", "reasoning says HTTP 401 Unauthorized", 1)
+    with pytest.raises(ProviderError):
+        provider.extract_response(invocation, "", "dsh: TRANSPORT: request failed", 1)
