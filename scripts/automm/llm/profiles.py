@@ -47,6 +47,7 @@ _HARNESS_FIELDS = {
         "api_key_file",
         "api_key_env",
         "base_url",
+        "config_file",
         "model",
         "max_prompt_chars",
     },
@@ -189,6 +190,9 @@ def _validate_kimi(name: str, profile: dict[str, Any]) -> list[str]:
         errors.append(f"profile {name}: 必须提供 api_key_file 或 api_key_env")
     elif key_file and not expand_path(key_file).is_file():
         errors.append(f"profile {name}: api_key_file 不存在：{key_file}")
+    config_file = profile.get("config_file")
+    if config_file and not expand_path(config_file).is_file():
+        errors.append(f"profile {name}: config_file 不存在：{config_file}")
     return errors
 
 
