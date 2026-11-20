@@ -128,6 +128,18 @@ def test_extract_reads_output_file(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         provider.extract_response(invocation, "", "ERROR: 401 Unauthorized", 1)
 
 
+def test_extract_classifies_timestamped_error_line_as_auth(tmp_path: Path) -> None:
+    provider = get_provider(profile(tmp_path))
+
+    with pytest.raises(ProviderAuthError):
+        provider.extract_response(
+            Invocation(command=["codex"]),
+            "",
+            "2026-11-20T12:00:00Z ERROR: 401 Unauthorized",
+            1,
+        )
+
+
 def test_extract_ignores_auth_markers_in_tool_output(tmp_path: Path) -> None:
     provider = get_provider(profile(tmp_path))
 
