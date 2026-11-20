@@ -233,6 +233,22 @@ def test_extract_recognizes_kimi_provider_auth_error(tmp_path: Path) -> None:
         provider.extract_response(invocation, "", stderr, 1)
 
 
+def test_extract_treats_kimi_rate_limit_as_retryable(tmp_path: Path) -> None:
+    provider = get_provider(make_profile(tmp_path))
+    invocation = Invocation(command=["node"], output_path=tmp_path / "response.json")
+    stderr = (
+        "kimi version 2.6.3\n"
+        "error: failed to run prompt: provider.auth_error: You've reached your usage limit "
+        "for this billing cycle. Your quota will be refreshed in the next cycle. "
+        "Upgrade to get more: https://www.kimi.com/membership/pricing?from=quota-upgrade. "
+        "Error details: resource_exhausted: rate limit exceeded\n"
+    )
+
+    with pytest.raises(ProviderError) as excinfo:
+        provider.extract_response(invocation, "", stderr, 1)
+    assert not isinstance(excinfo.value, ProviderAuthError)
+
+
 def test_missing_key_raises_config_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

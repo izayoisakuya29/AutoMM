@@ -256,7 +256,7 @@ node <main.mjs> -m <model> -p <prompt> --output-format text [extra_args...]
 - `--output-format text` 输出最终 assistant 文本；适配器从 stdout 解析 JSON。
 - 退出码语义：`0` 成功；`75` 视为可重试失败（按 `agent_transport` 重试）；其他非零退出码按 stderr 分类，明确认证失败时抛 `ProviderAuthError`。
 - `max_prompt_chars` 防止 Windows 命令行过长与超限 prompt；AutoMM 的 Agent prompt 一般在 10000 字符量级。
-- 若报 `provider.auth_error: You've reached your usage limit ... resource_exhausted: rate limit exceeded`，那是 Kimi 账户配额/速率限制，不是 profile 或 key 错误：等待配额刷新或升级账户后重跑。该错误当前会被识别为 `ProviderAuthError`（`external_human_required`），需要人工处理。
+- 若报 `provider.auth_error: You've reached your usage limit ... resource_exhausted: rate limit exceeded`，那是 Kimi 账户配额/速率限制，不是 profile 或 key 错误：等待配额刷新或升级账户后重跑。适配器按配额/限流标记将其归类为可重试的 `ProviderError`（`agent_transport`），不会作为凭据失败进入人工阻塞。
 
 ### 6.3 `config.toml` 要求与 seed
 
@@ -336,6 +336,8 @@ tools/kimi-cli/node_modules/@moonshot-ai/kimi-code/dist/main.mjs
 | `ProviderError`（进程失败、无法解析 JSON、可重试退出码） | `agent_transport` | 由 Runner 按 `timeout_policy` 重试 |
 | 响应 schema / 上下文不匹配 | `harness_invariant` | 严格失败并上报 |
 | 超时 | 既有 `AgentTimeoutError` 路径 | 保存日志后重试 |
+
+Kimi 的 `usage limit`、`quota`、`rate limit`、`resource_exhausted` 等配额/限流标记优先按可重试传输错误处理，不会误判为认证失败。
 
 不会因为一个模型族失败就切换到另一个模型族；跨族切换只能通过改 profile。
 
