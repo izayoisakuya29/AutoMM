@@ -32,7 +32,7 @@ _REQUIRED_FLAGS = (
     "--profile",
 )
 
-_ERROR_LINE_RE = re.compile(r"^error(?:\s*:|\b)", re.IGNORECASE)
+_ERROR_LINE_RE = re.compile(r"^\S*\s*ERROR\b", re.IGNORECASE)
 
 
 def _codex_error_lines(stderr: str) -> str:
