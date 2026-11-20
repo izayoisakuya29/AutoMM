@@ -21,6 +21,16 @@ from .parsing import looks_like_auth_error, parse_json_text as _parse_json_text
 from .paths import expand_path, project_path
 
 
+def _dsh_error_lines(stderr: str) -> str:
+    """提取 DSH 自身错误行（以 `dsh:` 开头），避免把推理/工具诊断误判为认证错误。"""
+    lines: list[str] = []
+    for line in (stderr or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("dsh:"):
+            lines.append(stripped)
+    return "\n".join(lines[-20:])
+
+
 class DshHeadlessProvider(LLMProvider):
     backend = "dsh_headless"
 
@@ -73,10 +83,15 @@ class DshHeadlessProvider(LLMProvider):
         if not model:
             raise ProviderConfigError("DSH profile 缺少 model")
 
-        patch_config: dict[str, Any] = {"provider": provider, "model": model}
-        extra_config = self.config.get("patch_config") or {}
-        if isinstance(extra_config, dict):
-            patch_config.update(extra_config)
+        extra_config = self.config.get("patch_config")
+        if extra_config is None:
+            extra_config = {}
+        elif not isinstance(extra_config, dict):
+            raise ProviderConfigError("DSH patch_config 必须是映射")
+        reserved = {key for key in ("provider", "model") if key in extra_config}
+        if reserved:
+            raise ProviderConfigError(f"DSH patch_config 不能覆盖保留字段：{sorted(reserved)}")
+        patch_config: dict[str, Any] = {"provider": provider, "model": model, **extra_config}
 
         patch_path = output_path.parent / "dsh_patch.yml"
         patch_path.parent.mkdir(parents=True, exist_ok=True)
@@ -91,17 +106,16 @@ class DshHeadlessProvider(LLMProvider):
 
         command = [
             self._executable(),
+            *(str(item) for item in (self.config.get("executable_args") or [])),
             "--profile",
             self._profile_name(),
             "--patch",
             str(patch_path),
         ]
-        permission_mode = self.config.get("permission_mode")
-        if permission_mode:
-            command.extend(["--permission-mode", str(permission_mode)])
-        approval_policy = self.config.get("approval_policy")
-        if approval_policy:
-            command.extend(["--approval-policy", str(approval_policy)])
+        permission_mode = str(self.config.get("permission_mode") or "workspace-write")
+        command.extend(["--permission-mode", permission_mode])
+        approval_policy = str(self.config.get("approval_policy") or "never")
+        command.extend(["--approval-policy", approval_policy])
         command.extend(str(item) for item in (self.config.get("extra_args") or []))
         command.append("-")
 
@@ -132,8 +146,9 @@ class DshHeadlessProvider(LLMProvider):
         returncode: int,
     ) -> dict[str, Any]:
         if returncode != 0:
-            detail = (stderr or stdout).strip()[-2000:]
-            if looks_like_auth_error(detail):
+            dsh_lines = _dsh_error_lines(stderr)
+            detail = (dsh_lines or stderr or stdout).strip()[-2000:]
+            if dsh_lines and looks_like_auth_error(dsh_lines):
                 raise ProviderAuthError(f"dsh 认证失败：{detail}")
             raise ProviderError(f"dsh headless 退出码 {returncode}：{detail}")
         text = (stdout or "").strip()
