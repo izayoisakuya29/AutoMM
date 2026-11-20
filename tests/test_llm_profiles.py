@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -158,6 +159,20 @@ def test_load_agent_registry_rejects_non_mapping_agents(project_root: Path) -> N
         load_agent_registry({"registry": "config/bad-registry.yaml"})
 
 
+def test_load_agent_registry_wraps_malformed_yaml(project_root: Path) -> None:
+    path = project_root / "config" / "malformed-registry.yaml"
+    path.write_text("agents: [unclosed\n", encoding="utf-8")
+    with pytest.raises(ProviderConfigError, match="registry"):
+        load_agent_registry({"registry": "config/malformed-registry.yaml"})
+
+
+def test_load_agent_registry_rejects_top_level_list(project_root: Path) -> None:
+    path = project_root / "config" / "list-registry.yaml"
+    path.write_text("- sanity-checker\n", encoding="utf-8")
+    with pytest.raises(ProviderConfigError, match="registry"):
+        load_agent_registry({"registry": "config/list-registry.yaml"})
+
+
 def test_load_profile_empty_config_does_not_use_defaults() -> None:
     with pytest.raises(ProviderConfigError, match="未知 profile"):
         load_profile("deepseek", {})
@@ -205,11 +220,41 @@ def test_validate_dsh_defaults_executable_to_dsh(
     assert any("dsh executable 不存在：dsh" in error for error in errors)
 
 
-def test_validate_profiles_reports_missing_kimi_home_parent(tmp_path: Path) -> None:
+def test_validate_profiles_tolerates_missing_kimi_home_ancestors(tmp_path: Path) -> None:
     config = make_runtime(tmp_path)
-    config["profiles"]["kimi"]["kimi_code_home"] = str(tmp_path / "missing" / "kimi-home")
+    config["profiles"]["kimi"]["kimi_code_home"] = str(tmp_path / "runtime" / "kimi-code-home")
+    errors = validate_profiles(config)
+    assert not any("kimi_code_home" in error for error in errors)
+
+
+def test_validate_profiles_rejects_kimi_home_below_regular_file(tmp_path: Path) -> None:
+    config = make_runtime(tmp_path)
+    blocked = tmp_path / "blocked"
+    blocked.write_text("", encoding="utf-8")
+    config["profiles"]["kimi"]["kimi_code_home"] = str(blocked / "home")
     errors = validate_profiles(config)
     assert any("kimi_code_home" in error for error in errors)
+
+
+def test_validate_profiles_rejects_kimi_home_regular_file(tmp_path: Path) -> None:
+    config = make_runtime(tmp_path)
+    home_file = tmp_path / "kimi-home-file"
+    home_file.write_text("", encoding="utf-8")
+    config["profiles"]["kimi"]["kimi_code_home"] = str(home_file)
+    errors = validate_profiles(config)
+    assert any("kimi_code_home" in error for error in errors)
+
+
+def test_validate_profiles_null_kimi_home_defaults_without_runtime(
+    project_root: Path, tmp_path: Path
+) -> None:
+    config = make_runtime(tmp_path)
+    config["profiles"]["kimi"]["kimi_code_home"] = None
+    runtime = project_root / "runtime"
+    if runtime.exists():
+        shutil.rmtree(runtime)
+    errors = validate_profiles(config)
+    assert not any("kimi_code_home" in error for error in errors)
 
 
 def test_find_codex_executable_sorts_versions_numerically(
