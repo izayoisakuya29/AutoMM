@@ -17,6 +17,8 @@ _AUTH_PATTERNS = (
     _AUTH_CONTEXT_RE,
     re.compile(r"\bunauthorized\b", re.IGNORECASE),
     re.compile(r"authentication[_ ](?:error|failed)", re.IGNORECASE),
+    re.compile(r"provider\.auth_error", re.IGNORECASE),
+    re.compile(r"api[ _-]?key[^\n]*not permitted", re.IGNORECASE),
     re.compile(r"invalid\s+(?:x-)?api[ _-]?key", re.IGNORECASE),
     re.compile(r"\bforbidden\b", re.IGNORECASE),
 )
