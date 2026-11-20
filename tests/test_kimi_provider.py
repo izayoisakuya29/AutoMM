@@ -113,6 +113,48 @@ def test_prepare_does_not_overwrite_existing_config(
     assert target.read_text(encoding="utf-8") == '[models.custom]\nmodel = "custom"\n'
 
 
+def test_existing_config_without_config_file_is_used(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    target = home / "config.toml"
+    target.write_text('[models.kimi-code]\nmodel = "kimi-code"\n', encoding="utf-8")
+    provider = _provider(tmp_path, monkeypatch, config_file=None)
+
+    invocation = provider.prepare("hello", tmp_path / "response.json")
+
+    assert target.read_text(encoding="utf-8") == _CONFIG_TEXT
+    assert invocation.env["KIMI_CODE_HOME"] == str(home)
+
+
+def test_config_path_directory_raises_config_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "config.toml").mkdir()
+    provider = _provider(tmp_path, monkeypatch)
+
+    with pytest.raises(ProviderConfigError, match="config.toml"):
+        provider.prepare("hello", tmp_path / "response.json")
+
+
+def test_config_copy_oserror_raises_config_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provider = _provider(tmp_path, monkeypatch)
+
+    def fail_replace(source: object, target: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("automm.llm.kimi.os.replace", fail_replace)
+
+    with pytest.raises(ProviderConfigError, match="复制失败"):
+        provider.prepare("hello", tmp_path / "response.json")
+    assert not list((tmp_path / "home").glob(".config-*.tmp"))
+
+
 def test_missing_config_file_raises_config_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -137,7 +179,7 @@ def test_prompt_limit_raises_config_error(
         provider.prepare("hello", tmp_path / "response.json")
 
 
-@pytest.mark.parametrize("value", ["many", 0, -1, None])
+@pytest.mark.parametrize("value", [True, 1.5, "30000", "many", 0, -1, None])
 def test_invalid_prompt_limit_raises_config_error(
     value: object, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -177,6 +219,18 @@ def test_auth_classification_uses_error_lines_only(tmp_path: Path) -> None:
     with pytest.raises(ProviderError) as rate_limited:
         provider.extract_response(invocation, "", "ERROR: rate limited", 1)
     assert not isinstance(rate_limited.value, ProviderAuthError)
+
+
+def test_extract_recognizes_kimi_provider_auth_error(tmp_path: Path) -> None:
+    provider = get_provider(make_profile(tmp_path))
+    invocation = Invocation(command=["node"], output_path=tmp_path / "response.json")
+    stderr = (
+        "error: failed to run prompt: provider.auth_error: "
+        "This API key is not permitted to access this endpoint."
+    )
+
+    with pytest.raises(ProviderAuthError):
+        provider.extract_response(invocation, "", stderr, 1)
 
 
 def test_missing_key_raises_config_error(
@@ -291,4 +345,20 @@ def test_probe_wraps_oserror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("automm.llm.kimi.subprocess.run", run)
 
     with pytest.raises(ProviderError, match="探测失败"):
+        provider.probe()
+
+
+def test_probe_version_nonzero_raises_provider_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provider = _provider(tmp_path, monkeypatch)
+
+    def run(command: list[str], **kwargs: object) -> _Completed:
+        if "--version" in command:
+            return _Completed(returncode=1, stderr="version failed")
+        return _Completed(stdout=_HELP_TEXT)
+
+    monkeypatch.setattr("automm.llm.kimi.subprocess.run", run)
+
+    with pytest.raises(ProviderError, match="版本探测失败"):
         provider.probe()

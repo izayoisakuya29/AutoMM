@@ -48,3 +48,19 @@ def test_looks_like_auth_error() -> None:
     assert not looks_like_auth_error("connection reset by peer")
     assert not looks_like_auth_error("permission denied")
     assert not looks_like_auth_error("request id 401234")
+
+
+def test_looks_like_auth_error_recognizes_kimi_provider_auth_error() -> None:
+    text = (
+        "error: failed to run prompt: provider.auth_error: "
+        "This API key is not permitted to access this endpoint."
+    )
+    assert looks_like_auth_error(text)
+
+
+def test_looks_like_auth_error_recognizes_authentication_error() -> None:
+    assert looks_like_auth_error("authentication_error: invalid credentials")
+
+
+def test_looks_like_auth_error_rejects_bare_not_permitted() -> None:
+    assert not looks_like_auth_error("sandbox: path not permitted")

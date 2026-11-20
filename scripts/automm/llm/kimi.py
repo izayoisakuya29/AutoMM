@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -65,8 +66,10 @@ class KimiCodeProvider(LLMProvider):
 
     def _ensure_config(self) -> Path:
         target = self._config_path()
-        if target.exists():
+        if target.is_file():
             return target
+        if target.exists():
+            raise ProviderConfigError(f"Kimi config.toml 不是普通文件：{target}")
         config_file = self.config.get("config_file")
         if not config_file:
             raise ProviderConfigError(
@@ -75,9 +78,19 @@ class KimiCodeProvider(LLMProvider):
         source = expand_path(config_file)
         if not source.is_file():
             raise ProviderConfigError(f"Kimi config_file 不存在：{source}")
+        temp: Path | None = None
         try:
-            shutil.copyfile(source, target)
+            fd, temp_name = tempfile.mkstemp(prefix=".config-", suffix=".tmp", dir=target.parent)
+            os.close(fd)
+            temp = Path(temp_name)
+            shutil.copyfile(source, temp)
+            os.replace(temp, target)
         except OSError as exc:
+            if temp is not None:
+                try:
+                    temp.unlink()
+                except OSError:
+                    pass
             raise ProviderConfigError(f"Kimi config.toml 复制失败：{exc}") from exc
         return target
 
@@ -139,11 +152,8 @@ class KimiCodeProvider(LLMProvider):
         model = str(self.config.get("model") or "")
         if not model:
             raise ProviderConfigError("Kimi profile 缺少 model")
-        try:
-            max_chars = int(self.config.get("max_prompt_chars", 30000))
-        except (TypeError, ValueError) as exc:
-            raise ProviderConfigError("Kimi profile 的 max_prompt_chars 必须是正整数") from exc
-        if max_chars <= 0:
+        max_chars = self.config.get("max_prompt_chars", 30000)
+        if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars <= 0:
             raise ProviderConfigError("Kimi profile 的 max_prompt_chars 必须是正整数")
         if len(prompt) > max_chars:
             raise ProviderConfigError(
