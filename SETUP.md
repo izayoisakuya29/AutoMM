@@ -107,6 +107,8 @@ AutoMM 通过 `config/agent_runtime.yaml` 的 `profiles` 选择原生 harness，
   `config.toml` 中 `[models.*]` 定义的别名；Kimi 桌面端 Daimon 分享配置通常没有 `kimi-code`，
   本机验收使用 K3.1 Pro 别名 **`k3d1-agent`**（源 config 的 `default_model` 仍是 `k3-agent`，
   profile 的 `-m` 会覆盖）。换 config 时按实际别名修改 profile。
+- 上下文：K3.1 Pro 的 `[models.k3d1-agent] max_context_size` 当前为 `1000000`；源 config 和
+  seed 后的 `runtime/kimi-code-home/config.toml` 都已更新。1M（XL）上下文可能需要相应会员等级。
 - Windows Git Bash：若 CLI 报找不到 bash，在 profile 的 `extra_env` 增加：
 
   ```yaml

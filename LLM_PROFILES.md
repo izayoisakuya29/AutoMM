@@ -269,6 +269,8 @@ Kimi Code CLI 依赖 `$KIMI_CODE_HOME/config.toml` 中的 provider、model 别�
 
 `model` 必须是该 `config.toml` 中 `[models.<alias>]` 定义的别名。模板早期填写的是 `kimi-code`，但该名称只在部分 OAuth 供应的配置中存在；**Kimi 桌面端 Daimon 分享配置通常没有这个别名**，CLI 会报 `Model "kimi-code" is not configured in config.toml.`。验收时已改为实际 config 中存在的 K3.1 Pro 别名 `k3d1-agent`；源 config 的 `default_model` 仍是 `k3-agent`，profile 的 `-m k3d1-agent` 会覆盖默认值（同文件还提供 `k3-agent`、`k2p6-agent`、`k2d8-preview` 等别名）。换用其他来源的 config 时，用 `node <main.mjs> --help` 或查看 `[models.*]` 小节确认可用别名，再修改 `config/agent_runtime.yaml` 的 `model`；不需要改源 config。
 
+K3.1 Pro 的上下文窗口由 `[models.k3d1-agent]` 的 `max_context_size` 控制。当前源 config 和 seed 后的 `runtime/kimi-code-home/config.toml` 都已设置为 `1000000`（1M）；两处需要同步修改，因为目标已存在时适配器不会覆盖。Kimi 桌面模型缓存显示 1M（XL）上下文可能需要相应会员等级；账户不支持时，服务端仍可能按较低上限处理。
+
 > seed 后的 `runtime/kimi-code-home/config.toml` 可能包含凭据。`runtime/` 已被 `.gitignore` 忽略；不要把它提交、复制进 `config/` 或粘贴到日志中。
 
 ### 6.4 API key 与 base URL
