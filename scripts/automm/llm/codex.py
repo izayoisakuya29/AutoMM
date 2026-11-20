@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -27,7 +28,21 @@ _REQUIRED_FLAGS = (
     "--sandbox",
     "--approve-for-me",
     "--cd",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--profile",
 )
+
+_ERROR_LINE_RE = re.compile(r"^error(?:\s*:|\b)", re.IGNORECASE)
+
+
+def _codex_error_lines(stderr: str) -> str:
+    """提取 Codex 自身错误行，避免工具输出中的 auth 字样被误判为认证失败。"""
+    lines = [
+        line.strip()
+        for line in (stderr or "").splitlines()
+        if _ERROR_LINE_RE.match(line.strip())
+    ]
+    return "\n".join(lines[-20:])
 
 
 class CodexProvider(LLMProvider):
@@ -52,6 +67,7 @@ class CodexProvider(LLMProvider):
             errors="replace",
             shell=False,
             check=False,
+            timeout=30,
         )
         if version.returncode != 0:
             raise ProviderError(f"Codex 版本探测失败：{(version.stderr or version.stdout).strip()[-500:]}")
@@ -63,6 +79,7 @@ class CodexProvider(LLMProvider):
             errors="replace",
             shell=False,
             check=False,
+            timeout=30,
         )
         help_text = help_result.stdout + help_result.stderr
         missing = [flag for flag in _REQUIRED_FLAGS if flag not in help_text]
@@ -77,7 +94,13 @@ class CodexProvider(LLMProvider):
         model = str(self.config.get("model") or "")
         if not model:
             raise ProviderConfigError("Codex profile 缺少 model")
-        schema_path = resolve_project_path(self.config["output_schema"], must_exist=True)
+        schema = str(self.config.get("output_schema") or "")
+        if not schema:
+            raise ProviderConfigError("Codex profile 缺少 output_schema")
+        try:
+            schema_path = resolve_project_path(schema, must_exist=True)
+        except (OSError, ValueError) as exc:
+            raise ProviderConfigError(f"Codex output_schema 无效：{exc}") from exc
         command = [
             self._executable(),
             "exec",
@@ -127,11 +150,18 @@ class CodexProvider(LLMProvider):
         returncode: int,
     ) -> dict[str, Any]:
         if returncode != 0:
-            detail = (stderr or stdout).strip()[-2000:]
-            if looks_like_auth_error(detail):
-                raise ProviderAuthError(f"Codex 认证失败：{detail}")
+            error_lines = _codex_error_lines(stderr)
+            if looks_like_auth_error(error_lines):
+                raise ProviderAuthError(f"Codex 认证失败：{error_lines[-2000:]}")
+            detail = error_lines[-2000:] or (stderr or stdout).strip()[-2000:]
             raise ProviderError(f"Codex Agent 退出码 {returncode}：{detail}")
         output_path = invocation.output_path
         if output_path is None or not output_path.exists():
             raise ProviderError("Agent 未生成 response.json")
-        return read_json(output_path)
+        try:
+            value = read_json(output_path)
+        except (OSError, ValueError) as exc:
+            raise ProviderError(f"无法读取 Codex 响应：{exc}") from exc
+        if not isinstance(value, dict):
+            raise ProviderError("Codex 响应不是 JSON 对象")
+        return value
