@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from automm.common import CONFIG_DIR, ROOT, FileLock, read_yaml, write_text
+from automm.llm.profiles import profile_warnings, validate_agent_profiles, validate_profiles
 from automm.problems import (
     create_assumption_version,
     create_formulation_version,
@@ -107,11 +108,15 @@ def validate_config() -> None:
             if value and Path(str(value)).is_absolute():
                 errors.append(f"{filename}:{field} 必须是相对路径")
     registry = loaded.get("agent_registry.yaml", {}).get("agents", {})
+    runtime = loaded.get("agent_runtime.yaml", {})
+    errors.extend(validate_profiles(runtime))
+    errors.extend(validate_agent_profiles(runtime, registry))
+    for warning in profile_warnings(runtime):
+        print(f"WARN {warning}")
     for agent, item in registry.items():
         prompt = item.get("prompt")
         if item.get("enabled", True) and (not prompt or not (ROOT / prompt).is_file()):
             errors.append(f"Agent {agent} 的 prompt 不存在：{prompt}")
-    runtime = loaded.get("agent_runtime.yaml", {})
     for field in ("registry", "output_schema"):
         value = runtime.get(field)
         if not value or not (ROOT / value).is_file():

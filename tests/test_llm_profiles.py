@@ -109,6 +109,20 @@ def test_validate_profiles_reports_unknown_field(tmp_path: Path) -> None:
     assert any("未知字段" in error for error in errors)
 
 
+@pytest.mark.parametrize("value", [True, 1.5, -1])
+def test_validate_profiles_rejects_invalid_timeout(tmp_path: Path, value: object) -> None:
+    config = make_runtime(tmp_path)
+    config["profiles"]["deepseek"]["timeout_seconds"] = value
+    errors = validate_profiles(config)
+    assert any("timeout_seconds" in error for error in errors)
+
+
+def test_validate_profiles_accepts_zero_timeout(tmp_path: Path) -> None:
+    config = make_runtime(tmp_path)
+    config["profiles"]["deepseek"]["timeout_seconds"] = 0
+    assert validate_profiles(config) == []
+
+
 def test_validate_profiles_reports_missing_kimi_key(tmp_path: Path) -> None:
     config = make_runtime(tmp_path)
     config["profiles"]["kimi"].pop("api_key_file")
@@ -300,6 +314,18 @@ def test_find_codex_executable_sorts_versions_numerically(
 
     assert found is not None
     assert "1.10.0.0" in found
+
+
+def test_find_codex_executable_falls_back_to_appx_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    exe = tmp_path / "codex.exe"
+    exe.write_text("", encoding="utf-8")
+    monkeypatch.setattr("automm.llm.codex_paths.shutil.which", lambda _name: None)
+    monkeypatch.setattr("automm.llm.codex_paths._appx_codex_candidates", lambda: [exe])
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "missing"))
+
+    assert find_codex_executable({}) == str(exe)
 
 
 def test_profile_warnings_for_missing_kimi_key_file(tmp_path: Path) -> None:
