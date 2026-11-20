@@ -63,20 +63,42 @@ def test_command_batch_rejects_unknown_artifact_without_partial_write(initialize
     assert manifest["artifacts"]["problem_understanding"] is False
 
 
-def test_dsh_headless_command_is_argv_task(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_dsh_headless_command_uses_stdin_and_patch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("automm.llm.dsh.DshHeadlessProvider._executable", lambda self: "dsh")
-    provider = get_provider({"provider": "dsh_headless", "executable": "dsh", "profile": "headless", "tools_mode": "native"})
-    invocation = provider.prepare("hello task", Path("response.json"))
-    assert invocation.command == ["dsh", "--profile", "headless", "hello task"]
-    assert invocation.stdin is None
-    assert invocation.env is not None and invocation.env["DSH_TOOLS_MODE"] == "native"
+    profile = {
+        "name": "deepseek",
+        "harness": "dsh_headless",
+        "executable": "dsh",
+        "dsh_home": str(Path.home() / ".dsh"),
+        "dsh_profile": "headless",
+        "provider": "deepseek-official",
+        "model": "deepseek-v4-pro",
+        "permission_mode": "workspace-write",
+        "approval_policy": "never",
+    }
+    provider = get_provider(profile)
+    invocation = provider.prepare("hello task", tmp_path / "response.json")
+    assert invocation.command[:2] == ["dsh", "--profile"]
+    assert invocation.command[-1] == "-"
+    assert invocation.stdin == "hello task"
+    assert (tmp_path / "dsh_patch.yml").is_file()
 
 
-def test_codex_command_keeps_approval_and_sandbox_independent(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_codex_command_uses_bypass_and_stdin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("automm.llm.codex.CodexProvider._executable", lambda self: "codex")
-    provider = get_provider({"provider": "codex_exec", "executable": "codex", "output_schema": "config/agent_response.schema.json", "sandbox": "workspace-write", "automatic_approval": True, "skip_git_repo_check": True})
-    invocation = provider.prepare("p", Path("response.json"))
-    assert "--approve-for-me" in invocation.command
+    profile = {
+        "name": "openai",
+        "harness": "codex_exec",
+        "executable": "codex",
+        "codex_home": str(tmp_path),
+        "model": "gpt-6-luna",
+        "bypass_approvals": True,
+        "skip_git_repo_check": True,
+        "output_schema": "config/agent_response.schema.json",
+    }
+    provider = get_provider(profile)
+    invocation = provider.prepare("p", tmp_path / "response.json")
+    assert "--dangerously-bypass-approvals-and-sandbox" in invocation.command
     assert "--sandbox" not in invocation.command
     assert invocation.stdin == "p"
 
