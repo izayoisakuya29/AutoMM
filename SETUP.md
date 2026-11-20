@@ -1,4 +1,4 @@
-# AutoMM 0.0.4-dsh 配置教程
+# AutoMM 0.0.4 配置教程
 
 > 面向 Windows + PowerShell。从「刚 clone 仓库」走到「全部配置完成 + 拿到启动 prompt」。
 > 全程不需要改任何 harness 源码；ssh密钥/题目/数据都由你手动放置。
@@ -12,8 +12,8 @@
 | Windows + PowerShell | 本机 |
 | Python 3.11+ | `python --version`（3.13 已实测） |
 | uv（推荐，可选） | `uv --version`；没有也能用 `python -m venv` + `pip` |
-| Node.js + npm | `node --version`（装 dsh 用） |
-| DeepSeek API 凭据 | DSH 调用模型用，见第 2 步 |
+| Node.js + npm | `node --version`（DSH / Kimi CLI 用） |
+| 模型后端凭据 | DeepSeek / OpenAI / Kimi 按需，见第 2 步 |
 | 一台 Linux SSH 服务器 | 可 SSH + SFTP，装好 Python 3.11+ 与 numpy/pandas/scipy/openpyxl |
 | QQ 邮箱 + 授权码 | 可选，用于通知；授权码 ≠ 登录密码 |
 | 题目 + 数据文件 | 仓库里**不含**真实数据，需你自备，见第 3 步 |
@@ -31,27 +31,110 @@ cd AutoMM
 
 ---
 
-## 2. 安装并初始化 DSH（模型后端）
+## 2. 模型后端
 
-DSH 是 Node 命令，与 Python venv 无关。
+AutoMM 通过 `config/agent_runtime.yaml` 的 `profiles` 选择原生 harness，默认 `deepseek`。模型族与 harness 绑定，不做协议转换；完整字段、按 Agent 覆盖和安全说明见 `LLM_PROFILES.md`。以下命令都在仓库根目录执行，并使用项目 venv 的 Python。
+
+### 2.1 DeepSeek（DSH）
+
+- 确认 `config/agent_runtime.yaml` 的 `deepseek.executable` 指向 DSH CLI，例如本机：
+  `D:/deepseek harness/resources/runtime/cli/bin/dsh.cmd`。
+- 确认 `~/.dsh/profiles/headless` 已初始化（没有时先在普通终端执行一次
+  `dsh --profile headless --help`，或运行一次 `dsh web` 完成初始化）。
+- 模型切换：只改 profile 的 `provider` + `model`。适配器每次动作都会生成
+  `--patch` 覆盖 `agent-default-model`，不需要手改 DSH 的模型配置。
+- 凭据：DSH 0.2.2 的 headless **默认禁用托管凭据存储**，只认启动环境、工作目录 `.env`
+  和 `$DSH_HOME/.env`；AutoMM 会从子进程环境中移除 `DEEPSEEK_*`，因此推荐按 DSH 官方说明
+  在 `~/.dsh/profiles/headless/cordis.patch.yml` 末尾恢复凭据存储：
+
+  ```yaml
+  - id: credentials
+    disabled: false
+  - id: authorization
+    disabled: false
+  - id: deepseek-account
+    disabled: false
+  ```
+
+  这样 headless 会读取 `~/.dsh/.credentials.yaml` 中的 `refs.DEEPSEEK_API_KEY`，
+  密钥既不需要进入仓库，也不需要写入 profile。
+- 验证：
+
+  ```powershell
+  .venv/Scripts/python.exe scripts/smoke_llm_roundtrip.py --profile deepseek
+  ```
+
+  预期打印 `"returncode": 0` 和符合 schema 的 `response`。
+
+### 2.2 OpenAI（Codex）
+
+- 安装 Codex CLI/桌面端并完成 ChatGPT 登录（`codex login`），或按 Codex 自己的方式配置 API key。
+- `config/agent_runtime.yaml` 保持 `executable: auto`：AutoMM 依次查找 PATH 上的 `codex`、
+  `C:\Program Files\WindowsApps\OpenAI.Codex_*\app\resources\codex.exe`，无法枚举
+  WindowsApps 时回退到当前用户 AppX 注册表（按版本取最新）。
+- `CODEX_HOME` 默认 `~/.codex`；ChatGPT 登录态和 Codex 配置都留在该目录，AutoMM 不读取、不复制。
+- 适配器用 `--output-schema` 强制结构化 JSON，并用 `--output-last-message` 把最终消息写入
+  `runtime/actions/<action_id>/response.json`。当前 profile 为完全 bypass
+  （`--dangerously-bypass-approvals-and-sandbox`），**风险自负**；需要审批时把
+  `bypass_approvals` 改为 `false` 并配置 `sandbox`。
+- 网络：Codex 需要能访问 ChatGPT 后端。若 smoke 报 `workspace routing discovery timed out`
+  或 MCP transport 错误，先检查代理/VPN、`chatgpt.com` 连通性和 Codex 的 MCP server 配置。
+- 验证：
+
+  ```powershell
+  .venv/Scripts/python.exe scripts/smoke_llm_roundtrip.py --profile openai
+  ```
+
+### 2.3 Kimi（Kimi Code）
+
+- 在项目内安装官方 CLI（Node >= 22.19）：
+
+  ```powershell
+  cd tools\kimi-cli
+  npm install --omit=dev --no-audit --no-fund
+  node node_modules/@moonshot-ai/kimi-code/dist/main.mjs --version
+  cd ..\..
+  ```
+
+  预期最后一条命令打印 `2.6.3`。profile 通过 `node` +
+  `tools/kimi-cli/node_modules/@moonshot-ai/kimi-code/dist/main.mjs` 调用，避免 `.cmd`
+  对含引号/换行 prompt 的二次解析。
+
+- API key：设置 `KIMI_API_KEY` 环境变量，或让 profile 的 `api_key_file` 指向一个 JSON 文件
+  （格式 `{"apiKey":"..."}`）。不要把 key 写进 `config/agent_runtime.yaml` 或提交到仓库。
+- `config_file` 与 seed：适配器会把 `config_file` 复制为
+  `runtime/kimi-code-home/config.toml`（目标已存在时不覆盖）。`model` 必须是该
+  `config.toml` 中 `[models.*]` 定义的别名；Kimi 桌面端 Daimon 分享配置通常没有 `kimi-code`，
+  本机验收使用其 `default_model` **`k3-agent`**。换 config 时按实际别名修改 profile。
+- Windows Git Bash：若 CLI 报找不到 bash，在 profile 的 `extra_env` 增加：
+
+  ```yaml
+  extra_env:
+    KIMI_SHELL_PATH: "C:/Program Files/Git/bin/bash.exe"
+  ```
+
+- 验证：
+
+  ```powershell
+  .venv/Scripts/python.exe scripts/smoke_llm_roundtrip.py --profile kimi
+  ```
+
+  若错误信息包含 `•` 且 PowerShell 控制台为 GBK，先执行
+  `$env:PYTHONIOENCODING = "utf-8"` 再重跑。
+
+### 2.4 三个 profile 的往返验证
+
+依次运行（每次会消耗少量模型额度）：
 
 ```powershell
-npm i -g @deepseek-ai/dsh
-dsh --version                    # 应打印版本号（如 0.1.1-rc.2）
-dsh --profile headless --help    # 首次会自动初始化 headless profile
+.venv/Scripts/python.exe scripts/smoke_llm_roundtrip.py --profile deepseek
+.venv/Scripts/python.exe scripts/smoke_llm_roundtrip.py --profile openai
+.venv/Scripts/python.exe scripts/smoke_llm_roundtrip.py --profile kimi
 ```
 
-确认模型能通（这一步会消耗一点点 token）：
-
-```powershell
-dsh --profile headless "只输出 JSON 对象 {\"status\":\"ok\"}，不要解释"
-```
-
-预期：stdout 打印 `{"status": "ok"}`，退出码 0。
-
-> 模型与凭据：默认模型在 `$env:DSH_HOME\settings.yaml`（`agent-default-model`），
-> API 凭据在 `$env:DSH_HOME\.credentials.yaml`（`refs.DEEPSEEK_API_KEY`）。
-> 若还没配置，先跑一次 `dsh web` 登录，或手动填这两个文件。
+每个命令都应在 stdout 打印 `"returncode": 0` 和符合 `config/agent_response.schema.json` 的
+`response`。失败时脚本会打印含 `error`、`returncode` 和 `stderr_tail` 的 JSON，不会伪造成功；
+按 `LLM_PROFILES.md` 的对应 harness 章节排查。
 
 ---
 
@@ -174,7 +257,7 @@ python scripts\notify_email.py poll
 
 ## 8. 启动harness
 
-先单步跑一个动作，确认 dsh headless 真实调用 OK：
+先单步跑一个动作，确认所选模型后端（默认 DSH headless）真实调用 OK：
 
 ```powershell
 python scripts\orchestrator_runner.py
@@ -220,7 +303,7 @@ python monitor\monitor.py
 
 ## 二、环境与前置状态
 - 工作目录：本仓库根目录（用 venv 的 python：.\.venv\Scripts\python.exe）。
-- 已配置：LLM=dsh_headless；计算=remote SSH；邮件=QQ；default_backend=ssh。
+- 已配置：模型后端=default_profile(deepseek/DSH)，可按 Agent 覆盖；计算=remote SSH；邮件=QQ；default_backend=ssh。
 - 当前：active_problem=crop_2024，current_stage=problem_understanding。
 
 ## 三、角色与硬约束

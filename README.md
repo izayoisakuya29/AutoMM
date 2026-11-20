@@ -1,12 +1,22 @@
 # AutoMM 0.0.4 Beta
 
-AutoMM 是基于dsh生态开发的，面向数学建模竞赛的全自动研究 Harness。它可以做到自动化地按小问顺序推进问题理解、文献研究、假设、公式、实现、计算、可行性校验、可视化和可选稳健性实验，最后生成可追溯的 `reports/final_summary.md`。同时，AutoMM还提供了一个可随时启动的dashboard，旨在实时掌控建模状态并快捷查看假设与公式推演等信息。
+AutoMM 是面向数学建模竞赛的全自动研究 Harness，模型调用层支持原生多 harness。它可以做到自动化地按小问顺序推进问题理解、文献研究、假设、公式、实现、计算、可行性校验、可视化和可选稳健性实验，最后生成可追溯的 `reports/final_summary.md`。同时，AutoMM还提供了一个可随时启动的dashboard，旨在实时掌控建模状态并快捷查看假设与公式推演等信息。
 <img width="1276" height="713" alt="image" src="https://github.com/user-attachments/assets/313da9ac-53ae-4379-8ebb-9f4952d13413" />
 
 
 ## QuickStart
 
 参考项目中的`SETUP.md`，进行快速初始化流程。
+
+## 模型后端
+
+AutoMM 默认使用 DeepSeek（DSH），并支持按 Agent 切换：
+
+- OpenAI → Codex CLI
+- Kimi → Kimi Code 官方 CLI
+- DeepSeek → DeepSeek Harness
+
+配置和示例见 `LLM_PROFILES.md`。模型族与原生 harness 绑定，不做 Anthropic 兼容网关等协议转换，也不做跨族自动回退。
 
 ## 快速检查
 
