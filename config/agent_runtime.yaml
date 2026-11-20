@@ -1,19 +1,37 @@
 enabled: true
-# LLM 后端：dsh_headless（默认，DeepSeek Harness）或 codex_exec（回归/降级）。
-provider: dsh_headless
-# dsh CLI 可执行名。
-executable: dsh
-# dsh 的 profile；headless 为一次性任务 profile。
-profile: headless
-# dsh headless 的工具呈现模式：native | code | both。AutoMM Agent 需要 read/write/edit/bash/pwsh，用 native。
-tools_mode: native
-# 以下字段仅 codex_exec 后端使用；dsh 后端忽略。
-model: ""
-sandbox: workspace-write
-automatic_approval: true
-ephemeral: false
-skip_git_repo_check: true
-timeout_seconds: 1800
+default_profile: deepseek
+profiles:
+  deepseek:
+    harness: dsh_headless
+    executable: "D:/deepseek harness/resources/runtime/cli/bin/dsh.cmd"
+    dsh_home: ~/.dsh
+    dsh_profile: headless
+    provider: deepseek-official
+    model: deepseek-v4-pro
+    permission_mode: workspace-write
+    approval_policy: never
+    timeout_seconds: 2400
+  openai:
+    harness: codex_exec
+    executable: auto
+    codex_home: ~/.codex
+    model: gpt-6-luna
+    bypass_approvals: true
+    sandbox: danger-full-access
+    skip_git_repo_check: true
+  kimi:
+    harness: kimi_code
+    executable: node
+    executable_args:
+      - tools/kimi-cli/node_modules/@moonshot-ai/kimi-code/dist/main.mjs
+    kimi_code_home: runtime/kimi-code-home
+    api_key_file: "C:/Users/MECHREVO/AppData/Roaming/kimi-desktop/daimon-share/daimon/kimi-code-key.json"
+    api_key_env: KIMI_API_KEY
+    config_file: "C:/Users/MECHREVO/AppData/Roaming/kimi-desktop/daimon-share/daimon/runtime/kimi-code/config.toml"
+    base_url: https://agent-gw.kimi.com/coding/v1
+    model: kimi-code
+    max_prompt_chars: 30000
+    timeout_seconds: 2400
 stage_timeout_seconds:
   default: 1800
   problem_understanding: 1200
@@ -40,12 +58,3 @@ output_schema: config/agent_response.schema.json
 registry: config/agent_registry.yaml
 max_output_chars: 200000
 capability_probe_on_start: true
-# 仅 codex_exec 后端的 CLI 能力白名单；dsh 后端只用 `dsh --version` 探测。
-required_capabilities:
-  - --output-schema
-  - --output-last-message
-  - --skip-git-repo-check
-  - --json
-  - --sandbox
-  - --approve-for-me
-  - --cd

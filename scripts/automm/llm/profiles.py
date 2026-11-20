@@ -212,6 +212,11 @@ def validate_profiles(config: dict[str, Any]) -> list[str]:
         if not isinstance(profile, dict):
             errors.append(f"profile {name} 必须是映射")
             continue
+        timeout = profile.get("timeout_seconds")
+        if timeout is not None and (
+            isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 0
+        ):
+            errors.append(f"profile {name}: timeout_seconds 必须是非负整数")
         harness = profile.get("harness")
         if not isinstance(harness, str) or harness not in HARNESSES:
             errors.append(f"profile {name}: 未知 harness：{harness}")
