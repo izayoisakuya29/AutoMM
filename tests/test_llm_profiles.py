@@ -48,7 +48,7 @@ def make_runtime(tmp_path: Path) -> dict:
                 "executable": sys.executable,
                 "executable_args": [str(main_js)],
                 "api_key_file": str(key_file),
-                "model": "kimi-code/kimi-for-coding",
+                "model": "kimi-code",
                 "max_prompt_chars": 30000,
             },
         },
@@ -114,6 +114,34 @@ def test_validate_profiles_reports_missing_kimi_key(tmp_path: Path) -> None:
     config["profiles"]["kimi"].pop("api_key_file")
     errors = validate_profiles(config)
     assert any("api_key" in error for error in errors)
+
+
+def test_validate_profiles_accepts_kimi_config_file(tmp_path: Path) -> None:
+    config = make_runtime(tmp_path)
+    config_file = tmp_path / "config.toml"
+    config_file.write_text('[models.kimi-code]\nmodel = "kimi-code"\n', encoding="utf-8")
+    config["profiles"]["kimi"]["config_file"] = str(config_file)
+
+    assert validate_profiles(config) == []
+
+
+def test_validate_profiles_accepts_kimi_without_config_file(tmp_path: Path) -> None:
+    config = make_runtime(tmp_path)
+    assert "config_file" not in config["profiles"]["kimi"]
+
+    errors = validate_profiles(config)
+
+    assert errors == []
+    assert not any("config_file" in error for error in errors)
+
+
+def test_validate_profiles_rejects_missing_kimi_config_file(tmp_path: Path) -> None:
+    config = make_runtime(tmp_path)
+    config["profiles"]["kimi"]["config_file"] = str(tmp_path / "absent.toml")
+
+    errors = validate_profiles(config)
+
+    assert any("config_file" in error for error in errors)
 
 
 def test_profile_warnings_for_missing_kimi_env(tmp_path: Path) -> None:
