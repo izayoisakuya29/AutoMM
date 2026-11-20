@@ -29,7 +29,7 @@ profiles:
     api_key_env: KIMI_API_KEY
     config_file: "C:/Users/MECHREVO/AppData/Roaming/kimi-desktop/daimon-share/daimon/runtime/kimi-code/config.toml"
     base_url: https://agent-gw.kimi.com/coding/v1
-    model: k3-agent
+    model: k3d1-agent
     max_prompt_chars: 30000
     timeout_seconds: 2400
 stage_timeout_seconds:

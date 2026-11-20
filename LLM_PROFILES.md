@@ -241,7 +241,7 @@ DSH 0.2.2 的 headless profile **默认禁用托管凭据存储**（`credentials
 | `api_key_env` | string | `KIMI_API_KEY` | 优先读取的环境变量名 |
 | `config_file` | path | 空 | 源 `config.toml`；仅在目标文件不存在时用于 seed |
 | `base_url` | string | 空 | 非空时注入 `KIMI_CODE_BASE_URL` |
-| `model` | string | 必填 | Kimi CLI 的模型**别名**，必须存在于 seed 后的 `config.toml`；当前 profile 使用 `k3-agent` |
+| `model` | string | 必填 | Kimi CLI 的模型**别名**，必须存在于 seed 后的 `config.toml`；当前 profile 使用 K3.1 Pro 的 `k3d1-agent` |
 | `max_prompt_chars` | int | `30000` | prompt 长度上限；超过时报配置错误，不做静默截断 |
 | `executable` | string | `node` | 运行 `main.mjs` 的 Node 可执行文件 |
 | `executable_args` | list[string] | 必填 | 第一项必须是 `main.mjs` 路径 |
@@ -267,7 +267,7 @@ Kimi Code CLI 依赖 `$KIMI_CODE_HOME/config.toml` 中的 provider、model 别�
 3. **目标不存在且 profile 提供 `config_file`**：把源文件原子复制到目标（先写同目录临时文件，再 `os.replace`）。
 4. 目标不存在且没有 `config_file`：报 `ProviderConfigError`，提示先完成 Kimi Code 登录/初始化或提供 `config_file`。
 
-`model` 必须是该 `config.toml` 中 `[models.<alias>]` 定义的别名。模板早期填写的是 `kimi-code`，但该名称只在部分 OAuth 供应的配置中存在；**Kimi 桌面端 Daimon 分享配置通常没有这个别名**，CLI 会报 `Model "kimi-code" is not configured in config.toml.`。验收时已按实际 config 的 `default_model` 改为 `k3-agent`（同文件还提供 `k2p6-agent`、`k2d8-preview`、`k3d1-agent` 等别名）。换用其他来源的 config 时，用 `node <main.mjs> --help` 或查看 `[models.*]` 小节确认可用别名，再修改 `config/agent_runtime.yaml` 的 `model`；不需要改源 config。
+`model` 必须是该 `config.toml` 中 `[models.<alias>]` 定义的别名。模板早期填写的是 `kimi-code`，但该名称只在部分 OAuth 供应的配置中存在；**Kimi 桌面端 Daimon 分享配置通常没有这个别名**，CLI 会报 `Model "kimi-code" is not configured in config.toml.`。验收时已改为实际 config 中存在的 K3.1 Pro 别名 `k3d1-agent`；源 config 的 `default_model` 仍是 `k3-agent`，profile 的 `-m k3d1-agent` 会覆盖默认值（同文件还提供 `k3-agent`、`k2p6-agent`、`k2d8-preview` 等别名）。换用其他来源的 config 时，用 `node <main.mjs> --help` 或查看 `[models.*]` 小节确认可用别名，再修改 `config/agent_runtime.yaml` 的 `model`；不需要改源 config。
 
 > seed 后的 `runtime/kimi-code-home/config.toml` 可能包含凭据。`runtime/` 已被 `.gitignore` 忽略；不要把它提交、复制进 `config/` 或粘贴到日志中。
 
@@ -323,7 +323,7 @@ tools/kimi-cli/node_modules/@moonshot-ai/kimi-code/dist/main.mjs
 
 退出码 `0` 且 response 通过 schema 校验才算成功。失败时脚本打印结构化错误 JSON，包含 `returncode`、`error` 与 `stderr_tail`，不会伪造成功。
 
-> Windows 控制台若为 GBK 编码，CLI 错误信息中的 `•` 等字符可能让错误 JSON 打印失败（`UnicodeEncodeError`）。先设置 `PYTHONIOENCODING=utf-8`（PowerShell：`$env:PYTHONIOENCODING = "utf-8"`）再重跑，即可看到真实错误。
+> `scripts/smoke_llm_roundtrip.py` 已强制以 UTF-8 输出，避免 Windows GBK 控制台因模型输出中的 `•` 等字符抛 `UnicodeEncodeError`。如果你运行其他打印模型输出的工具仍遇到 GBK 编码错误，可设置 `PYTHONIOENCODING=utf-8`（PowerShell：`$env:PYTHONIOENCODING = "utf-8"`）。
 
 ---
 

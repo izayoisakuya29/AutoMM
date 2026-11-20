@@ -105,7 +105,8 @@ AutoMM 通过 `config/agent_runtime.yaml` 的 `profiles` 选择原生 harness，
 - `config_file` 与 seed：适配器会把 `config_file` 复制为
   `runtime/kimi-code-home/config.toml`（目标已存在时不覆盖）。`model` 必须是该
   `config.toml` 中 `[models.*]` 定义的别名；Kimi 桌面端 Daimon 分享配置通常没有 `kimi-code`，
-  本机验收使用其 `default_model` **`k3-agent`**。换 config 时按实际别名修改 profile。
+  本机验收使用 K3.1 Pro 别名 **`k3d1-agent`**（源 config 的 `default_model` 仍是 `k3-agent`，
+  profile 的 `-m` 会覆盖）。换 config 时按实际别名修改 profile。
 - Windows Git Bash：若 CLI 报找不到 bash，在 profile 的 `extra_env` 增加：
 
   ```yaml
@@ -119,8 +120,8 @@ AutoMM 通过 `config/agent_runtime.yaml` 的 `profiles` 选择原生 harness，
   .venv/Scripts/python.exe scripts/smoke_llm_roundtrip.py --profile kimi
   ```
 
-  若错误信息包含 `•` 且 PowerShell 控制台为 GBK，先执行
-  `$env:PYTHONIOENCODING = "utf-8"` 再重跑。
+  smoke 脚本已强制 UTF-8 输出；如果其他打印模型输出的工具仍遇到 GBK 编码错误，
+  可执行 `$env:PYTHONIOENCODING = "utf-8"` 再重跑。
 
 ### 2.4 三个 profile 的往返验证
 

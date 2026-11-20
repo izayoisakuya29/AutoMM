@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
 import time
 
 import jsonschema
@@ -33,6 +34,12 @@ def _stderr_tail(exc: Exception, result: subprocess.CompletedProcess[str] | None
 
 
 def main() -> int:
+    # Windows 的 GBK 控制台无法编码部分模型输出（例如 "•"）；强制以 UTF-8 输出，
+    # 避免诊断 JSON 在打印阶段抛 UnicodeEncodeError。
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="AutoMM LLM harness 往返 smoke")
     parser.add_argument("--profile", required=True, help="agent_runtime.yaml 中的 profile 名")
     args = parser.parse_args()
