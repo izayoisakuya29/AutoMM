@@ -89,6 +89,13 @@ def invoke_agent(agent: str, action: dict[str, Any], action_id: str) -> tuple[di
     config = runtime_config()
     profile = resolve_profile(agent)
     profile["output_schema"] = config["output_schema"]
+    profile_timeout = profile.get("timeout_seconds")
+    if profile_timeout is None:
+        timeout_seconds = stage_timeout_seconds(str(action.get("stage") or ""))
+    elif isinstance(profile_timeout, bool) or not isinstance(profile_timeout, int) or profile_timeout < 0:
+        raise ProviderConfigError("profile timeout_seconds 必须是非负整数")
+    else:
+        timeout_seconds = profile_timeout
     provider = get_provider(profile)
     try:
         if config.get("capability_probe_on_start", True):
@@ -105,13 +112,6 @@ def invoke_agent(agent: str, action: dict[str, Any], action_id: str) -> tuple[di
     schema_path = resolve_project_path(config["output_schema"], must_exist=True)
     prompt = _agent_prompt(agent, action, action_id)
     invocation = provider.prepare(prompt, output_path)
-    profile_timeout = profile.get("timeout_seconds")
-    if profile_timeout is None:
-        timeout_seconds = stage_timeout_seconds(str(action.get("stage") or ""))
-    elif isinstance(profile_timeout, bool) or not isinstance(profile_timeout, int) or profile_timeout < 0:
-        raise ProviderConfigError("profile timeout_seconds 必须是非负整数")
-    else:
-        timeout_seconds = profile_timeout
     process: subprocess.Popen | None = None
     try:
         flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
