@@ -57,13 +57,25 @@ def load_runtime_config() -> dict[str, Any]:
 
 
 def load_agent_registry(config: dict[str, Any] | None = None) -> dict[str, Any]:
-    config = config or load_runtime_config()
-    path = resolve_project_path(config["registry"], must_exist=True)
-    return read_yaml(path).get("agents", {})
+    config = load_runtime_config() if config is None else config
+    registry = config.get("registry")
+    if not isinstance(registry, str) or not registry.strip():
+        raise ProviderConfigError("agent_runtime.registry 必须是非空路径字符串")
+    try:
+        path = resolve_project_path(registry, must_exist=True)
+    except (FileNotFoundError, ValueError) as exc:
+        raise ProviderConfigError(f"agent registry 不存在或不可用：{registry}") from exc
+    document = read_yaml(path)
+    if not isinstance(document, dict):
+        raise ProviderConfigError(f"agent registry 必须是映射：{path}")
+    agents = document.get("agents", {})
+    if not isinstance(agents, dict):
+        raise ProviderConfigError(f"agent registry 的 agents 必须是映射：{path}")
+    return agents
 
 
 def load_profile(name: str, runtime_config: dict[str, Any] | None = None) -> dict[str, Any]:
-    config = runtime_config or load_runtime_config()
+    config = load_runtime_config() if runtime_config is None else runtime_config
     profiles = config.get("profiles") or {}
     if not isinstance(profiles, dict):
         raise ProviderConfigError("agent_runtime.profiles 必须是映射")
@@ -88,7 +100,7 @@ def resolve_profile(
     runtime_config: dict[str, Any] | None = None,
     agent_registry: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    config = runtime_config or load_runtime_config()
+    config = load_runtime_config() if runtime_config is None else runtime_config
     agents = agent_registry if agent_registry is not None else load_agent_registry(config)
     entry = agents.get(agent)
     if not isinstance(entry, dict) or entry.get("enabled", True) is False:
@@ -108,8 +120,9 @@ def _resolves_executable(value: str | Path | None) -> bool:
 
 def _validate_dsh(name: str, profile: dict[str, Any]) -> list[str]:
     errors: list[str] = []
-    if not _resolves_executable(profile.get("executable")):
-        errors.append(f"profile {name}: dsh executable 不存在：{profile.get('executable')}")
+    executable = profile.get("executable") or "dsh"
+    if not _resolves_executable(executable):
+        errors.append(f"profile {name}: dsh executable 不存在：{executable}")
     home = expand_path(profile.get("dsh_home", "~/.dsh"))
     if not home.is_dir():
         errors.append(f"profile {name}: dsh_home 不存在：{home}")
@@ -154,6 +167,12 @@ def _validate_kimi(name: str, profile: dict[str, Any]) -> list[str]:
     max_chars = profile.get("max_prompt_chars", 30000)
     if not isinstance(max_chars, int) or max_chars <= 0:
         errors.append(f"profile {name}: max_prompt_chars 必须是正整数")
+    home = project_path(profile.get("kimi_code_home", "runtime/kimi-code-home"))
+    parent = home.parent
+    if not parent.is_dir():
+        errors.append(f"profile {name}: kimi_code_home 的父目录不存在：{parent}")
+    elif not os.access(parent, os.W_OK):
+        errors.append(f"profile {name}: kimi_code_home 的父目录不可写：{parent}")
     key_file = profile.get("api_key_file")
     key_env = profile.get("api_key_env")
     if not key_file and not key_env:
@@ -169,8 +188,8 @@ def validate_profiles(config: dict[str, Any]) -> list[str]:
     if not isinstance(profiles, dict) or not profiles:
         return ["agent_runtime.profiles 必须是非空映射"]
     default = config.get("default_profile")
-    if not default:
-        errors.append("agent_runtime.default_profile 不能为空")
+    if not isinstance(default, str) or not default.strip():
+        errors.append("agent_runtime.default_profile 必须是非空字符串")
     elif default not in profiles:
         errors.append(f"default_profile 不存在：{default}")
     elif not isinstance(profiles[default], dict) or profiles[default].get("enabled", True) is False:
@@ -180,17 +199,17 @@ def validate_profiles(config: dict[str, Any]) -> list[str]:
             errors.append(f"profile {name} 必须是映射")
             continue
         harness = profile.get("harness")
-        if harness not in HARNESSES:
+        if not isinstance(harness, str) or harness not in HARNESSES:
             errors.append(f"profile {name}: 未知 harness：{harness}")
             continue
         allowed = _COMMON_FIELDS | _HARNESS_FIELDS[harness]
         for key in profile:
             if key not in allowed:
                 errors.append(f"profile {name}: 未知字段：{key}")
+        if profile.get("enabled", True) is False:
+            continue
         if harness == "openjiuwen":
             errors.append(f"profile {name}: openjiuwen 本阶段仅保留扩展点，尚未实现")
-            continue
-        if profile.get("enabled", True) is False:
             continue
         if harness == "dsh_headless":
             errors.extend(_validate_dsh(name, profile))
@@ -207,8 +226,13 @@ def validate_agent_profiles(config: dict[str, Any], agents: dict[str, Any]) -> l
     for agent, entry in agents.items():
         if not isinstance(entry, dict):
             continue
+        if entry.get("enabled", True) is False:
+            continue
         name = entry.get("profile")
-        if not name:
+        if name is None:
+            continue
+        if not isinstance(name, str) or not name.strip():
+            errors.append(f"Agent {agent}: profile 必须是非空字符串：{name!r}")
             continue
         profile = profiles.get(name) if isinstance(profiles, dict) else None
         if not isinstance(profile, dict):
@@ -233,6 +257,8 @@ def profile_warnings(
         if profile.get("enabled", True) is False:
             continue
         env_name = str(profile.get("api_key_env", "KIMI_API_KEY"))
-        if not environ.get(env_name) and not profile.get("api_key_file"):
+        key_file = profile.get("api_key_file")
+        has_key_file = bool(key_file) and expand_path(key_file).is_file()
+        if not environ.get(env_name) and not has_key_file:
             warnings.append(f"profile {name}: 环境变量 {env_name} 未设置，运行时可能需要人工阻塞")
     return warnings
