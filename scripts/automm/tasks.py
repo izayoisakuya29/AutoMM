@@ -104,6 +104,14 @@ def make_task_spec(
 ) -> dict[str, Any]:
     if not command:
         raise ValueError("任务命令不能为空")
+    task_config = resolve_project_path(config_path, must_exist=True)
+    task_config_data = read_yaml(task_config)
+    task_compute = task_config_data.get("compute", {}) if isinstance(task_config_data, dict) else {}
+    if isinstance(task_compute, dict) and "default_backend" in task_compute:
+        raise ValueError(
+            "task config 不得设置 compute.default_backend；"
+            "计算后端只允许在 config/compute.yaml 配置，避免任务级静默覆盖 SSH 等硬约束"
+        )
     merged_config = effective_config(problem_id, question_id, config_path)
     compute_config = merged_config.get("compute", {})
     default_backend = str(compute_config.get("default_backend", "local")).lower()
@@ -121,7 +129,6 @@ def make_task_spec(
     if executable not in {"python", "python3", "python.exe", Path(sys.executable).name.lower()}:
         raise ValueError("初版本只允许 Python 任务命令")
     code = resolve_project_path(code_path, must_exist=True)
-    task_config = resolve_project_path(config_path, must_exist=True)
     task_input = resolve_project_path(input_path, must_exist=True)
     output = resolve_project_path(output_directory)
     workdir = resolve_project_path(working_directory, must_exist=True)

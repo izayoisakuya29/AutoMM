@@ -178,6 +178,8 @@ def run_once() -> dict[str, Any]:
             except AgentTimeoutError as exc:
                 state = load_state()
                 note_recovery(state, failure_class="agent_transport", error=str(exc), progress={"productive": False, "stage": action.get("stage")}, problem_id=action.get("problem_id"), question_id=action.get("question_id"))
+                state.setdefault("recovery", {})["last_action_id"] = action_id
+                state["recovery"]["last_run_directory"] = f"runtime/actions/{action_id}"
                 state["blocking"] = []
                 state["last_action"] = f"{action_id}: agent_timeout_retry"
                 _set_next_wake(state)
@@ -223,6 +225,9 @@ def run_once() -> dict[str, Any]:
         if agent_response and agent_response["status"] in {"success", "warning"}:
             state["recovery_status"] = "normal"
             state["failure_class"] = "quality_warning" if agent_response["status"] == "warning" else None
+            recovery = state.setdefault("recovery", {})
+            recovery["mode"] = "normal"
+            recovery["same_fingerprint_streak"] = 0
         if agent_response and agent_response["status"] in {"failed", "blocked"}:
             reasons = agent_response.get("blocking_reasons") or [f"Agent {action['agent']} 返回 {agent_response['status']}"]
             failure_class = str(agent_response.get("failure_class") or "code_runtime")
@@ -259,6 +264,14 @@ def run_once() -> dict[str, Any]:
             state["blocking"] = [action["reason"]]
         elif action["action"] not in {"poll_email", "wait_for_compute"}:
             state["blocking"] = []
+            if agent_response is None and state.get("recovery_status") != "human_blocked":
+                # 非 Agent 动作成功（最终摘要、通知、阶段迁移等）说明流程已经推进；
+                # 清掉先前 Agent 传输/运行时失败留下的 retrying/convergence 状态。
+                state["recovery_status"] = "normal"
+                state["failure_class"] = None
+                recovery = state.setdefault("recovery", {})
+                recovery["mode"] = "normal"
+                recovery["same_fingerprint_streak"] = 0
         if agent_response:
             for warning in agent_response.get("warnings", []):
                 if warning not in state.setdefault("warnings", []):
@@ -271,6 +284,8 @@ def run_once() -> dict[str, Any]:
         state = load_state()
         failure_class = classify_exception(exc)
         note_recovery(state, failure_class=failure_class, error=str(exc), progress={"productive": False, "stage": action.get("stage") if "action" in locals() else None}, problem_id=action.get("problem_id") if "action" in locals() else None, question_id=action.get("question_id") if "action" in locals() else None)
+        state.setdefault("recovery", {})["last_action_id"] = action_id
+        state["recovery"]["last_run_directory"] = f"runtime/actions/{action_id}"
         state["blocking"] = [f"Runner {action_id} 失败：{exc}"] if failure_class in {"harness_invariant", "external_human_required"} else []
         state["last_action"] = f"{action_id}: {state.get('recovery_status', 'failed')}"
         _set_next_wake(state)
