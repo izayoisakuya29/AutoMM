@@ -45,6 +45,10 @@ def stage_timeout_seconds(stage: str | None, *, fallback: int = 1800) -> int:
 
 
 def classify_exception(exc: BaseException) -> str:
+    from .llm.base import ProviderAuthError, ProviderConfigError
+
+    if isinstance(exc, (ProviderConfigError, ProviderAuthError)):
+        return "external_human_required"
     if isinstance(exc, HarnessInvariantError):
         return "harness_invariant"
     if isinstance(exc, AgentTimeoutError):

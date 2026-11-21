@@ -14,7 +14,8 @@ import psutil
 
 from .common import ROOT, RUNTIME_DIR, append_jsonl, read_json, read_yaml, relative, resolve_project_path, utc_now, write_json
 from .failure_policy import AgentTimeoutError, AgentTransportError, HarnessInvariantError, stage_timeout_seconds
-from .llm import ProviderError, get_provider
+from .llm import ProviderAuthError, ProviderConfigError, ProviderError, get_provider
+from .llm.profiles import resolve_profile
 from .problems import decide_assumption_version, decide_formulation_version, problem_dir, question_manifest
 from .state import append_ledger
 from .visualization import record_figure_review
@@ -59,12 +60,24 @@ def _agent_prompt(agent: str, action: dict[str, Any], action_id: str) -> str:
         raise AgentRuntimeError(f"Agent 未注册或已禁用：{agent}")
     prompt_path = resolve_project_path(entry["prompt"], must_exist=True)
     instructions = prompt_path.read_text(encoding="utf-8")
-    recovery_mode = (action.get("recovery") or {}).get("mode")
+    recovery = action.get("recovery") or {}
+    recovery_mode = recovery.get("mode")
     recovery_hint = ""
     if recovery_mode == "convergence":
         recovery_hint = "\n注意：当前处于「收敛模式」（同一失败已连续发生多次）。请复用已有产物，只做最小静态检查并生成合规响应，不要再重复之前失败的操作。\n"
     elif recovery_mode == "degraded_review":
         recovery_hint = "\n注意：当前处于「降级审查模式」。请基于已有产物给出结论性响应，不要再发起新计算。\n"
+    if action.get("resume"):
+        last_action_id = str(recovery.get("last_action_id") or "").strip()
+        if last_action_id:
+            previous_dir = f"runtime/actions/{last_action_id}"
+            last_error = str(recovery.get("last_error") or "")[:500]
+            recovery_hint += (
+                f"\n注意：上一次动作被网络/传输中断（上一次 action_id `{last_action_id}`；错误：{last_error}）。"
+                f"上一次动作目录是 `{previous_dir}`，其中可能有 stdout.log、stderr.log、status.json 和 response.json。"
+                "请先读取该目录的日志/状态，并检查当前版本目录中已经生成的产物，判断哪些工作已完成，然后从断点继续；"
+                "不要重做已完成的分析、推导或计算。本次仍只返回符合 schema 的 JSON，并使用本次 action_id。\n"
+            )
     return f"""你正在作为 AutoMM 专职 Agent `{agent}` 执行一次同步动作。
 必须遵守项目根目录 AGENTS.md 中的 AutoMM Agent 规则，并参考 PROJECT.md（项目指南）与 RESEARCH_LOOP.md（研究循环）。专职说明如下：
 
@@ -86,10 +99,21 @@ def _agent_prompt(agent: str, action: dict[str, Any], action_id: str) -> str:
 
 def invoke_agent(agent: str, action: dict[str, Any], action_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     config = runtime_config()
-    provider = get_provider(config)
+    profile = resolve_profile(agent)
+    profile["output_schema"] = config["output_schema"]
+    profile_timeout = profile.get("timeout_seconds")
+    if profile_timeout is None:
+        timeout_seconds = stage_timeout_seconds(str(action.get("stage") or ""))
+    elif isinstance(profile_timeout, bool) or not isinstance(profile_timeout, int) or profile_timeout < 0:
+        raise ProviderConfigError("profile timeout_seconds 必须是非负整数")
+    else:
+        timeout_seconds = profile_timeout
+    provider = get_provider(profile)
     try:
         if config.get("capability_probe_on_start", True):
             provider.probe()
+    except (ProviderConfigError, ProviderAuthError):
+        raise
     except ProviderError as exc:
         raise AgentTransportError(str(exc)) from exc
     run_dir = RUNTIME_DIR / "actions" / action_id
@@ -100,7 +124,6 @@ def invoke_agent(agent: str, action: dict[str, Any], action_id: str) -> tuple[di
     schema_path = resolve_project_path(config["output_schema"], must_exist=True)
     prompt = _agent_prompt(agent, action, action_id)
     invocation = provider.prepare(prompt, output_path)
-    timeout_seconds = stage_timeout_seconds(str(action.get("stage") or ""))
     process: subprocess.Popen | None = None
     try:
         flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
@@ -141,6 +164,8 @@ def invoke_agent(agent: str, action: dict[str, Any], action_id: str) -> tuple[di
     events_path.write_text(stdout, encoding="utf-8")
     try:
         response = provider.extract_response(invocation, stdout, stderr, process.returncode)
+    except (ProviderConfigError, ProviderAuthError):
+        raise
     except ProviderError as exc:
         raise AgentTransportError(f"Agent {agent} 响应提取失败：{exc}") from exc
     raw_size = output_path.stat().st_size if output_path.exists() else len(stdout or "")
@@ -151,11 +176,31 @@ def invoke_agent(agent: str, action: dict[str, Any], action_id: str) -> tuple[di
         jsonschema.validate(response, schema)
     except jsonschema.ValidationError as exc:
         raise HarnessInvariantError(f"Agent response schema 校验失败：{exc.message}") from exc
-    if response["action_id"] != action_id:
-        # action_id 未回显属 LLM 瞬时错误，重试即可；不应上升为 harness_invariant 硬阻塞。
-        raise AgentTransportError("Agent 响应 action_id 不匹配")
     _validate_response_context(response, action)
-    meta = {"command": invocation.command, "provider": provider.backend, "run_directory": relative(run_dir), "returncode": process.returncode}
+    correction_from: str | None = None
+    if response["action_id"] != action_id:
+        # action_id 只是关联令牌，不是安全边界；上下文已经验证属于本次动作。
+        # 保留模型已完成的工作，不因一次回显错误丢弃整个响应。
+        correction_from = str(response["action_id"])
+        response["action_id"] = action_id
+        response.setdefault("warnings", []).append(
+            f"Agent 回显 action_id={correction_from} 与预期 {action_id} 不一致；"
+            "已按其余上下文归一化并保留本次成果。"
+        )
+    # 适配器 meta（如 dsh_home/patch_path）作为附加信息合并；provider/harness/profile/model
+    # 等运行时字段以本次解析结果为准，避免适配器同名键（如 DSH 的 model provider）覆盖。
+    meta = {
+        **(invocation.meta or {}),
+        "command": invocation.command,
+        "provider": provider.backend,
+        "harness": profile["harness"],
+        "profile": profile.get("name"),
+        "model": profile.get("model"),
+        "run_directory": relative(run_dir),
+        "returncode": process.returncode,
+    }
+    if correction_from:
+        meta["action_id_corrected_from"] = correction_from
     write_json(run_dir / "status.json", {"action_id": action_id, "status": "validated", "at": utc_now(), **meta})
     return response, meta
 

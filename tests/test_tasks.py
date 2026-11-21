@@ -174,10 +174,41 @@ def test_interrupted_task_allows_two_retries(initialized_problem: tuple[str, Pat
         submit_task(exhausted, force=True, force_reason="worker interrupted")
 
 
-def test_default_backend_from_config_routes_compute(initialized_problem: tuple[str, Path], project_root: Path) -> None:
+def test_task_config_cannot_override_compute_backend(
+    initialized_problem: tuple[str, Path],
+    project_root: Path,
+) -> None:
     problem_id, _ = initialized_problem
     code, config, input_path = _accepted_version(problem_id, project_root)
     write_yaml(config, {"compute": {"max_local_concurrent_tasks": 1, "default_backend": "ssh"}})
+    output = problem_dir(problem_id) / "prob01" / "versions" / "assumption_v001" / "results" / "run-remote"
+    with pytest.raises(ValueError, match="default_backend"):
+        make_task_spec(
+            problem_id=problem_id,
+            question_id="prob01",
+            stage="computation",
+            command=[sys.executable, str(code)],
+            code_path=str(code),
+            config_path=str(config),
+            input_path=str(input_path),
+            assumption_version="assumption_v001",
+            formulation_version="formulation_v001",
+            output_directory=str(output),
+            timeout_seconds=10,
+            seed=7,
+        )
+
+
+def test_project_compute_backend_routes_task(
+    initialized_problem: tuple[str, Path],
+    project_root: Path,
+) -> None:
+    problem_id, _ = initialized_problem
+    code, config, input_path = _accepted_version(problem_id, project_root)
+    compute_path = project_root / "config" / "compute.yaml"
+    compute = read_yaml(compute_path)
+    compute["default_backend"] = "ssh"
+    write_yaml(compute_path, compute)
     output = problem_dir(problem_id) / "prob01" / "versions" / "assumption_v001" / "results" / "run-remote"
     spec = make_task_spec(
         problem_id=problem_id,

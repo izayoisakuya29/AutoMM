@@ -30,8 +30,12 @@ def _response(action_id: str, problem_id: str, question_id: str) -> dict[str, An
     }
 
 
-def test_invoke_agent_dsh_roundtrip(monkeypatch: pytest.MonkeyPatch, initialized_problem: tuple[str, Path]) -> None:
-    """用 mock 的 dsh headless 走完 invoke_agent 全链路（构造命令→执行→解析→schema 校验）。"""
+def test_invoke_agent_dsh_roundtrip(
+    monkeypatch: pytest.MonkeyPatch,
+    initialized_problem: tuple[str, Path],
+    tmp_path: Path,
+) -> None:
+    """用 mock 的 dsh headless 走完 invoke_agent 全链路。"""
     problem_id, _ = initialized_problem
     action_id = "act-1234567890abcdef"
     canned = json.dumps(_response(action_id, problem_id, "prob01"), ensure_ascii=False)
@@ -45,16 +49,26 @@ def test_invoke_agent_dsh_roundtrip(monkeypatch: pytest.MonkeyPatch, initialized
     monkeypatch.setattr("automm.agent_runtime.subprocess.Popen", lambda *args, **kwargs: FakeProcess())
     monkeypatch.setattr("automm.llm.dsh.DshHeadlessProvider._executable", lambda self: "dsh")
     monkeypatch.setattr(
+        "automm.agent_runtime.resolve_profile",
+        lambda agent: {
+            "name": "test-dsh",
+            "harness": "dsh_headless",
+            "executable": "dsh",
+            "dsh_home": str(Path.home() / ".dsh"),
+            "dsh_profile": "headless",
+            "provider": "deepseek-official",
+            "model": "deepseek-v4-pro",
+            "permission_mode": "workspace-write",
+            "approval_policy": "never",
+        },
+    )
+    monkeypatch.setattr(
         "automm.agent_runtime.runtime_config",
         lambda: {
-            "provider": "dsh_headless",
-            "executable": "dsh",
-            "profile": "headless",
-            "tools_mode": "native",
-            "capability_probe_on_start": False,
             "output_schema": "config/agent_response.schema.json",
             "registry": "config/agent_registry.yaml",
             "max_output_chars": 200000,
+            "capability_probe_on_start": False,
         },
     )
 
@@ -70,4 +84,73 @@ def test_invoke_agent_dsh_roundtrip(monkeypatch: pytest.MonkeyPatch, initialized
     assert response["status"] == "success"
     assert response["problem_id"] == problem_id
     assert meta["provider"] == "dsh_headless"
-    assert meta["command"][:3] == ["dsh", "--profile", "headless"]
+    assert meta["harness"] == "dsh_headless"
+    assert meta["profile"] == "test-dsh"
+    assert meta["model"] == "deepseek-v4-pro"
+
+
+def test_action_id_mismatch_is_normalized_and_commands_apply(
+    monkeypatch: pytest.MonkeyPatch,
+    initialized_problem: tuple[str, Path],
+) -> None:
+    """模型只写错 action_id、其余上下文正确时，应保留响应并应用 commands。"""
+    from automm.agent_runtime import apply_agent_commands
+    from automm.problems import question_manifest
+
+    problem_id, _ = initialized_problem
+    expected_action_id = "act-expected1234567890"
+    wrong_action_id = "act-wrong000000000000"
+    payload = _response(wrong_action_id, problem_id, "prob01")
+    payload["commands"] = [
+        {"name": "record_artifact", "arguments": {"name": "sanity_check", "completed": True}}
+    ]
+    canned = json.dumps(payload, ensure_ascii=False)
+
+    class FakeProcess:
+        returncode = 0
+
+        def communicate(self, input: str | None = None, timeout: float | None = None) -> tuple[str, str]:
+            return canned, ""
+
+    monkeypatch.setattr("automm.agent_runtime.subprocess.Popen", lambda *args, **kwargs: FakeProcess())
+    monkeypatch.setattr("automm.llm.dsh.DshHeadlessProvider._executable", lambda self: "dsh")
+    monkeypatch.setattr(
+        "automm.agent_runtime.resolve_profile",
+        lambda agent: {
+            "name": "test-dsh",
+            "harness": "dsh_headless",
+            "executable": "dsh",
+            "dsh_home": str(Path.home() / ".dsh"),
+            "dsh_profile": "headless",
+            "provider": "deepseek-official",
+            "model": "deepseek-v4-pro",
+            "permission_mode": "workspace-write",
+            "approval_policy": "never",
+        },
+    )
+    monkeypatch.setattr(
+        "automm.agent_runtime.runtime_config",
+        lambda: {
+            "output_schema": "config/agent_response.schema.json",
+            "registry": "config/agent_registry.yaml",
+            "max_output_chars": 200000,
+            "capability_probe_on_start": False,
+        },
+    )
+
+    action = {
+        "action": "run_agent",
+        "agent": "sanity-checker",
+        "stage": "sanity_check",
+        "problem_id": problem_id,
+        "question_id": "prob01",
+    }
+    response, meta = invoke_agent("sanity-checker", action, expected_action_id)
+
+    assert response["action_id"] == expected_action_id
+    assert meta["action_id_corrected_from"] == wrong_action_id
+    assert any("action_id" in warning for warning in response["warnings"])
+
+    apply_agent_commands(response, action)
+    _, manifest = question_manifest(problem_id, "prob01")
+    assert manifest["artifacts"]["sanity_check"] is True

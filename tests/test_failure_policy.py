@@ -15,6 +15,14 @@ def test_invariant_is_strict() -> None:
     assert classify_exception(HarnessInvariantError("bad state")) == "harness_invariant"
 
 
+def test_provider_config_and_auth_are_external_human_required() -> None:
+    from automm.failure_policy import classify_exception
+    from automm.llm.base import ProviderAuthError, ProviderConfigError
+
+    assert classify_exception(ProviderConfigError("bad profile")) == "external_human_required"
+    assert classify_exception(ProviderAuthError("bad key")) == "external_human_required"
+
+
 def test_same_fingerprint_enters_convergence_mode() -> None:
     state = {"recovery": {}}
     note_recovery(state, failure_class="code_runtime", error="same", progress={"productive": False})
